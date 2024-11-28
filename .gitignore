@@ -1,6 +1,5 @@
 *
 !*.py
-!*.sh
 !*.stan
 !*.ipynb
 !*/

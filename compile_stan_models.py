@@ -317,8 +317,7 @@ def generate_stan_model_code(include_clusters: bool, add_zeros: bool, refT: bool
 
 path = 'Stan Models'
 
-if not os.path.exists(path):
-    os.makedirs(path)
+os.makedirs(path, exist_ok=True)
 
 # save the stan model code to a file
 c = [True, False]

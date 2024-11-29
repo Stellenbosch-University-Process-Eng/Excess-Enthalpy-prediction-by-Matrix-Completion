@@ -2,18 +2,22 @@ import numpy as np
 import pandas as pd
 import json
 import os
+import sys
 
 np.random.seed(2) # set random seed generator
 
-path = 'C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC' # path to save files
+if sys.platform == 'win32':
+    path = 'C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC' # path to save files
+else:
+    path = '/home/garren/Article - Pure PMF/Pure_MC'
 
 os.makedirs(f'{path}/Pure RK PMF', exist_ok=True) # create folder to save files for varying temperatures
 os.makedirs(f'{path}/Pure RK PMF - 298', exist_ok=True) # create folder to save files for 298.15 K
 
 # read data
-df = pd.read_excel('C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC/AllData.xlsx', sheet_name='Data')
-comps = pd.read_excel('C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC/AllData.xlsx', sheet_name='Components')
-subset_indices = pd.read_excel('C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC/AllData.xlsx', sheet_name='Indices').iloc[:,:2].to_numpy().astype(int)
+df = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Data')
+comps = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Components')
+subset_indices = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Indices').iloc[:,:2].to_numpy().astype(int)
 
 # Extract all indices across all data
 Idx_all = np.array(df.iloc[:,6:8].to_numpy().astype(int))[subset_indices[:,0]]

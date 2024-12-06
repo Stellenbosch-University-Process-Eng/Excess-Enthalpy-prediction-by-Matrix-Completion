@@ -17,10 +17,14 @@ os.makedirs(f'{path}/Pure RK PMF - 298', exist_ok=True) # create folder to save 
 # read data
 df = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Data')
 comps = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Components')
-subset_indices = pd.read_excel(f'{path}/AllData.xlsx', sheet_name='Indices').iloc[:,:2].to_numpy().astype(int)
 
 # Extract all indices across all data
-Idx_all = np.array(df.iloc[:,6:8].to_numpy().astype(int))[subset_indices[:,0]]
+idx1 = np.sum((df['Component 1'].to_numpy().astype(str)[:, np.newaxis] == comps['IUPAC'].to_numpy().astype(str)[np.newaxis, :]) * np.arange(len(comps))[np.newaxis,:], axis=1) # index of component 1
+idx2 = np.sum((df['Component 2'].to_numpy().astype(str)[:, np.newaxis] == comps['IUPAC'].to_numpy().astype(str)[np.newaxis, :]) * np.arange(len(comps))[np.newaxis,:], axis=1) # index of component 2
+idx_all = np.char.add(np.char.add(idx1.astype(str), ' + '), idx2.astype(str)) # all indices
+idx_all, idx = np.unique(idx_all, return_index=True) # unique indices
+idx_all = idx_all[np.argsort(idx)] # sort unique indices
+Idx_all = np.array([idx_all[i].split(' + ') for i in range(len(idx_all))]).astype(int) # convert unique indices to array
 
 # Extract functional groups
 fg = comps['Functional Group'].to_numpy().astype(str)

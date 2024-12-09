@@ -710,7 +710,133 @@ class Post_process:
                 print(f'{j}_{i}')
         clear_output(wait=False)
 
-    
+    def plot_func_groups_MC_vs_UNIFAC_with_embedded_box(self, data_type=None, A=None) -> None:
+        """
+        Description: Plots the functional groups for the MC and UNIFAC predictions. The box plots are embedded in the plot.
+
+        Inputs:
+            data_type   : str       -> Type of data to plot. Must be either 'Testing' or 'Training'.
+            A           : np.array  -> A tensor of size ranks x num_temperatures x num_compositions/2 x num_compounds x num_compounds (Optional)
+
+        Outputs:
+            None. Generates the 2D plots and stores it in the a created directory.
+        """
+
+        assert data_type in ['Testing', 'Training'], "data_type must be either 'Testing' or 'Training'"
+        png_path = f'{self.path}/2D Plots/Functional_Group_MC_vs_UNIFAC'
+        if A is None:
+            A = self.get_tensors()
+        if data_type == 'Testing':
+            Idx = self.testing_indices
+            y_MC_interp = self.extract_interps(A=A, Idx=Idx)
+            data_dict = self.get_testing_values(A=A)
+            png_path = f'{png_path}/Testing'
+        elif data_type == 'Training':
+            Idx = self.Idx_known
+            y_MC_interp = self.extract_interps(A=A, Idx=Idx)
+            data_dict = self.get_reconstructed_values(A=A)
+            png_path = f'{png_path}/Training'
+
+        os.makedirs(png_path, exist_ok=True) # Create directory if it does not exist
+        
+        # Get unique functional groups
+        true_unique_fg, idx = np.unique(self.fg, return_index=True) # Unique functional groups
+        true_unique_fg = true_unique_fg[np.argsort(idx)] # Sort to keep same format as listed in excel sheet
+
+        # Indices corresponding to the compounds. Used to extract correct functional groups
+        c1_idx = np.sum((data_dict['Component 1'][:, np.newaxis] == self.c_all[np.newaxis, :]) * np.arange(self.c_all.shape[0])[np.newaxis,:], axis=1)
+        c2_idx = np.sum((data_dict['Component 2'][:, np.newaxis] == self.c_all[np.newaxis, :]) * np.arange(self.c_all.shape[0])[np.newaxis,:], axis=1)
+        
+        # Extract functional groups
+        fg1 = self.fg[c1_idx]   # Functional groups for component 1
+        fg2 = self.fg[c2_idx]   # Functional groups for component 2
+        fg_mix = np.char.add(np.char.add(fg1, ' + '), fg2)  # Functional groups for the mixtures
+        unique_fg_mix, idx = np.unique(fg_mix, return_index=True)   # Unique functional groups for the mixtures
+        unique_fg_mix = unique_fg_mix[np.argsort(idx)]  # Sort to keep same format as listed in excel sheet
+        unique_fg_mix_split_testing = [fg.split(' + ') for fg in unique_fg_mix] # Obtain the individual functional groups for the mixtures
+        fg_indices = np.array([[np.where(true_unique_fg == ffg[0])[0][0], np.where(true_unique_fg == ffg[1])[0][0]] for ffg in unique_fg_mix_split_testing]) # Get the indices of the functional groups
+
+        # Generate plots
+        for r in range(len(self.ranks)):
+            for metrics in ['MAE', 'MARE']:
+                if metrics == 'MAE':
+                    box_plot = np.column_stack([np.abs(data_dict['MC [J/mol]'][:,r]-data_dict['Excess Enthalpy [J/mol]']), 
+                                                np.abs(data_dict['UNIFAC_DMD [J/mol]']-data_dict['Excess Enthalpy [J/mol]'])])
+                elif metrics == 'MARE':
+                    box_plot = np.column_stack([np.abs((data_dict['MC [J/mol]'][:,r]-data_dict['Excess Enthalpy [J/mol]'])/data_dict['Excess Enthalpy [J/mol]']), 
+                                                np.abs((data_dict['UNIFAC_DMD [J/mol]']-data_dict['Excess Enthalpy [J/mol]'])/data_dict['Excess Enthalpy [J/mol]'])])
+                    
+                fig, ax = plt.subplots(1,1,figsize=(10,10))
+                # Generate layout for the plot
+                ax.set_xlim(-0.5, len(true_unique_fg)-0.5)
+                ax.set_ylim(-0.5, len(true_unique_fg)-0.5)
+                ax.set_xticks(np.arange(len(true_unique_fg)), true_unique_fg, rotation=90)
+                ax.set_yticks(np.arange(len(true_unique_fg)), true_unique_fg)
+                # Add grid
+                minor_ticks = np.arange(-0.5, len(true_unique_fg)-0.5, 1)
+                ax.set_xticks(minor_ticks, minor=True)
+                ax.set_yticks(minor_ticks, minor=True)
+                ax.grid(which='minor', color='k', linestyle='--', linewidth=1, alpha=0.5)
+                
+                ax.invert_yaxis() # Invert y-axis
+
+                # Embed box plots
+                fract = 1/len(true_unique_fg) # lenght of total plot
+                offset = 0.1*fract  # offset for the box plots
+                ax1 = []    # List to store the axes for the box plots
+                for i in range(len(unique_fg_mix)):
+                    fg1_idx = fg1 == unique_fg_mix_split_testing[i][0]  # Functional groups of component 1 index
+                    fg2_idx = fg2 == unique_fg_mix_split_testing[i][1]  # Functional groups of component 2 index
+                    fg_idx = (fg1_idx.astype(int) + fg2_idx.astype(int)) == 2   # Functional groups of the mixture index
+                    xx, yy = fg_indices[i,1], len(true_unique_fg)-fg_indices[i,0] - 1   # x and y coordinates for the box plot. y coordinate is inverted due to the inverted y-axis
+                    rect = [xx*fract+offset, yy*fract+offset, fract-offset*2, fract-offset*2] # get the rectangle for the box plot
+                    box = ax.get_position() # get the position of the main plot
+                    width = box.width   # width of the main plot
+                    height = box.height # height of the main plot
+                    inax_position  = ax.transAxes.transform(rect[0:2]) 
+                    transFigure = fig.transFigure.inverted()
+                    infig_position = transFigure.transform(inax_position)    
+                    x = infig_position[0]
+                    y = infig_position[1]
+                    width *= rect[2]
+                    height *= rect[3]
+                    ax1 += [fig.add_axes([x,y,width,height])]
+
+                    # Check for nan's if Relative error with exess enthalpy of zero
+                    idx_not_nan = data_dict['Excess Enthalpy [J/mol]'][fg_idx] != 0
+                    ax1[-1].boxplot(box_plot[fg_idx,0][idx_not_nan], whis=(0,100), 
+                                showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
+                                medianprops=dict(color='r', linewidth=1.5), showfliers=False, 
+                                boxprops=dict(color='r', linewidth=1.5), whiskerprops=dict(color='r', linewidth=1.5, linestyle='--'), 
+                                widths=0.9, positions=[1])
+                    ax1[-1].boxplot(box_plot[fg_idx,1][idx_not_nan], whis=(0,100), 
+                                showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
+                                medianprops=dict(color='g', linewidth=1.5), showfliers=False, 
+                                boxprops=dict(color='g', linewidth=1.5), whiskerprops=dict(color='g', linewidth=1.5, linestyle='--'), 
+                                widths=0.9, positions=[2])
+                    
+                    # Cap the y-axis for the box plots at the 20th and 80th percentile and disable the ticks
+                    minlim = np.min(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 20, axis=0))
+                    maxlim = np.max(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 80, axis=0))
+                    ax1[-1].set_ylim(minlim, maxlim)
+                    ax1[-1].set_xticks([])
+                    ax1[-1].set_yticks([])
+                    ax1[-1].tick_params(axis='both', which='both', length=0)
+
+                # Grey plots for the lower triangle
+                for i in range(len(true_unique_fg)):
+                    for j in range(i+1, len(true_unique_fg)):
+                        ax.fill_between([i-0.5, i+0.5], [j-0.5, j-0.5], [j+0.5, j+0.5], color='k', alpha=0.3)
+                
+                plot_path = f'{png_path}/{metrics}_Rank_{self.ranks[r]}.png'
+
+                fig.savefig(plot_path, dpi=500, bbox_inches='tight')
+                plt.clf()
+                plt.close()
+
+                clear_output(wait=False)
+                print(f'{metrics}_Rank_{self.ranks[r]} saved')
+
 
     
 

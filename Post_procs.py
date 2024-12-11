@@ -756,16 +756,41 @@ class Post_process:
         unique_fg_mix_split_testing = [fg.split(' + ') for fg in unique_fg_mix] # Obtain the individual functional groups for the mixtures
         fg_indices = np.array([[np.where(true_unique_fg == ffg[0])[0][0], np.where(true_unique_fg == ffg[1])[0][0]] for ffg in unique_fg_mix_split_testing]) # Get the indices of the functional groups
 
+        max_val = 100 # max value for the difference in metrics
+        
+        # colour schemes for embedded box plots
+        MC_colour = 'g'
+        UNI_colour = 'r'
+
         # Generate plots
         for r in range(len(self.ranks)):
             for metrics in ['MAE', 'MARE']:
                 if metrics == 'MAE':
+                    # absolute error per datapoint for MC and UNIFAC
                     box_plot = np.column_stack([np.abs(data_dict['MC [J/mol]'][:,r]-data_dict['Excess Enthalpy [J/mol]']), 
                                                 np.abs(data_dict['UNIFAC_DMD [J/mol]']-data_dict['Excess Enthalpy [J/mol]'])])
+                    # MAE for MC and UNIFAC per combination of functional groups
+                    all_means = np.array([np.mean(box_plot[((fg1 == unique_fg_mix_split_testing[i][0]).astype(int) + (fg2 == unique_fg_mix_split_testing[i][1]).astype(int)) == 2, :], axis=0) for i in range(len(unique_fg_mix))])
+                    cbar_title = 'Difference in MAE [J/mol]'
                 elif metrics == 'MARE':
+                    # relative error per datapoint for MC and UNIFAC
                     box_plot = np.column_stack([np.abs((data_dict['MC [J/mol]'][:,r]-data_dict['Excess Enthalpy [J/mol]'])/data_dict['Excess Enthalpy [J/mol]']), 
-                                                np.abs((data_dict['UNIFAC_DMD [J/mol]']-data_dict['Excess Enthalpy [J/mol]'])/data_dict['Excess Enthalpy [J/mol]'])])
-                    
+                                                np.abs((data_dict['UNIFAC_DMD [J/mol]']-data_dict['Excess Enthalpy [J/mol]'])/data_dict['Excess Enthalpy [J/mol]'])])*100
+                    # Index where the experimental excess enthalpy is non-zero
+                    non_zero_idx = data_dict['Excess Enthalpy [J/mol]'] != 0
+                    # MARE for MC and UNIFAC per combination of functional groups with non-zero experimental excess enthalpy removed
+                    all_means = np.array([np.mean(box_plot[((fg1 == unique_fg_mix_split_testing[i][0]).astype(int) + (fg2 == unique_fg_mix_split_testing[i][1]).astype(int)) == 2, :][non_zero_idx[((fg1 == unique_fg_mix_split_testing[i][0]).astype(int) + (fg2 == unique_fg_mix_split_testing[i][1]).astype(int)) == 2]], axis=0) for i in range(len(unique_fg_mix))])
+                    cbar_title = 'Difference in MARE [%]'
+                
+                # Difference in metrics between MC and UNIFAC
+                diff_means = all_means[:,1] - all_means[:,0]
+                # Clip the difference in metrics to -max_val and max_val
+                diff_means_clip = np.clip(diff_means, -max_val, max_val)
+                # Create matrix for the difference in metrics
+                A_diff = np.nan*np.ones((len(true_unique_fg), len(true_unique_fg)))
+                # Add the difference in metrics to the matrix
+                A_diff[fg_indices[:,0], fg_indices[:,1]] = diff_means_clip
+
                 fig, ax = plt.subplots(1,1,figsize=(10,10))
                 # Generate layout for the plot
                 ax.set_xlim(-0.5, len(true_unique_fg)-0.5)
@@ -777,12 +802,23 @@ class Post_process:
                 ax.set_xticks(minor_ticks, minor=True)
                 ax.set_yticks(minor_ticks, minor=True)
                 ax.grid(which='minor', color='k', linestyle='--', linewidth=1, alpha=0.5)
-                
+                ax.tick_params(axis='both', which='minor', length=0)
                 ax.invert_yaxis() # Invert y-axis
+
+                # Plot the difference in metrics
+                im = ax.imshow(A_diff, cmap='RdYlGn', vmin=-max_val, vmax=max_val)
+                cbar = fig.colorbar(im, shrink=0.8)
+                c_ticks = cbar.get_ticks().astype(int)
+                c_tick_labels = c_ticks.astype(str)
+                c_tick_labels[0] = f'<{c_tick_labels[0]}'
+                c_tick_labels[-1] = f'>{c_tick_labels[-1]}'
+                cbar.set_ticks(c_ticks)
+                cbar.set_ticklabels(c_tick_labels)
+                plt.tight_layout()
 
                 # Embed box plots
                 fract = 1/len(true_unique_fg) # lenght of total plot
-                offset = 0.1*fract  # offset for the box plots
+                offset = 0.17*fract  # offset for the box plots
                 ax1 = []    # List to store the axes for the box plots
                 for i in range(len(unique_fg_mix)):
                     fg1_idx = fg1 == unique_fg_mix_split_testing[i][0]  # Functional groups of component 1 index
@@ -806,13 +842,13 @@ class Post_process:
                     idx_not_nan = data_dict['Excess Enthalpy [J/mol]'][fg_idx] != 0
                     ax1[-1].boxplot(box_plot[fg_idx,0][idx_not_nan], whis=(0,100), 
                                 showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
-                                medianprops=dict(color='r', linewidth=1.5), showfliers=False, 
-                                boxprops=dict(color='r', linewidth=1.5), whiskerprops=dict(color='r', linewidth=1.5, linestyle='--'), 
+                                medianprops=dict(color=MC_colour, linewidth=1.5), showfliers=False, 
+                                boxprops=dict(color=MC_colour, linewidth=1.5), whiskerprops=dict(color=MC_colour, linewidth=1.5, linestyle='--'), 
                                 widths=0.9, positions=[1])
                     ax1[-1].boxplot(box_plot[fg_idx,1][idx_not_nan], whis=(0,100), 
                                 showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
-                                medianprops=dict(color='g', linewidth=1.5), showfliers=False, 
-                                boxprops=dict(color='g', linewidth=1.5), whiskerprops=dict(color='g', linewidth=1.5, linestyle='--'), 
+                                medianprops=dict(color=UNI_colour, linewidth=1.5), showfliers=False, 
+                                boxprops=dict(color=UNI_colour, linewidth=1.5), whiskerprops=dict(color=UNI_colour, linewidth=1.5, linestyle='--'), 
                                 widths=0.9, positions=[2])
                     
                     # Cap the y-axis for the box plots at the 20th and 80th percentile and disable the ticks
@@ -827,9 +863,24 @@ class Post_process:
                 for i in range(len(true_unique_fg)):
                     for j in range(i+1, len(true_unique_fg)):
                         ax.fill_between([i-0.5, i+0.5], [j-0.5, j-0.5], [j+0.5, j+0.5], color='k', alpha=0.3)
+
+                # Add text to the color bar
+                # Get the position of the colorbar's axis
+                cbar_pos = cbar.ax.get_position()  # Returns a Bbox object
+
+                # Extract the bounding box coordinates: (x0, y0) is the bottom-left corner, and (width, height) are its dimensions
+                x0, y0, width, height = cbar_pos.x0, cbar_pos.y0, cbar_pos.width, cbar_pos.height
+
+                # Calculate the vertical positions for the text: bottom, middle, and top of the colorbar
+                text_positions = [y0, y0 + height / 2, y0 + 0.9999*height]
+
+                # Add text next to these positions using fig.text
+                fig.text(x0 + 0.8*width, text_positions[0], '(UNIFAC Best)', ha='left', va='center')  # Bottom text
+                fig.text(x0 + 0.8*width, text_positions[1], '(No difference)', ha='left', va='center')  # Middle text
+                fig.text(x0 + 0.8*width, text_positions[2], '(MC Best)', ha='left', va='center')     # Top text
+                fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90)  # Middle text
                 
                 plot_path = f'{png_path}/{metrics}_Rank_{self.ranks[r]}.png'
-
                 fig.savefig(plot_path, dpi=500, bbox_inches='tight')
                 plt.clf()
                 plt.close()

@@ -964,7 +964,8 @@ class Post_process:
                 ax.plot([0, N-1], [count, count], '--k', alpha=0.3)
 
             if data_type == 'Testing':
-                ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], '*k', markersize=5, alpha=0.2)
+                ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], '*k', markersize=5, alpha=0.2, label='Training Data')
+                ax.legend(loc='upper center', fontsize=12, bbox_to_anchor=(0.5, 1.07))
 
             mid_points = (np.array(end_points[:-1])+np.array(end_points[1:]))/2
             ax.set_xticks(mid_points, unique_fg, rotation=90, fontsize=12)

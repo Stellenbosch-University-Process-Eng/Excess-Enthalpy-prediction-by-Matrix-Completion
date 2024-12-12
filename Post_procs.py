@@ -10,7 +10,7 @@ import pandas as pd
 import os
 import sys
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, ListedColormap, BoundaryNorm
 import matplotlib
 from matplotlib.lines import Line2D
 import matplotlib.cm as cm
@@ -888,6 +888,107 @@ class Post_process:
                 clear_output(wait=False)
                 print(f'{metrics}_Rank_{self.ranks[r]} saved')
 
+    def plot_best_rank_vs_sparsity(self, data_type=None, A=None) -> None:
+        """
+        Description: Plots the best rank vs sparsity for the testing or training mixtures.
+
+        Inputs:
+            data_type   : str       -> Type of data to plot. Must be either 'Testing' or 'Training'.
+            A           : np.array  -> A tensor of size ranks x num_temperatures x num_compositions/2 x num_compounds x num_compounds (Optional)
+
+        Outputs:
+            None. Generates the 2D plots
+        """
+        assert data_type in ['Testing', 'Training'], "data_type must be either 'Testing' or 'Training'"
+
+        if A is None:
+            A = self.get_tensors()
+        if data_type == 'Testing':
+            data_dict = self.get_testing_values(A=A)
+            Idx = self.testing_indices
+        elif data_type == 'Training':
+            data_dict = self.get_reconstructed_values(A=A)
+            Idx = self.Idx_known
+
+        png_path = f'{self.path}/2D Plots/Best_Rank_vs_Sparsity_{data_type}'
+
+        N = len(self.c_all)
+        for metric in ['MAE', 'MARE']:
+            if metric == 'MAE':
+                diff_MC = np.abs(data_dict['MC [J/mol]'] - data_dict['Excess Enthalpy [J/mol]'][:,np.newaxis])
+                MAE_all_comps_ranks = np.array([np.mean(diff_MC[( (data_dict['Component 1'] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'] == self.c_all[idx[1]]).astype(int) ) == 2], axis=0) for idx in Idx])
+                plot_path = f'{png_path}_MAE.png'
+            elif metric == 'MARE':
+                diff_MC = np.abs(data_dict['MC [J/mol]'] - data_dict['Excess Enthalpy [J/mol]'][:,np.newaxis])/np.abs(data_dict['Excess Enthalpy [J/mol]'][:,np.newaxis])*100
+                idx_non_zero = data_dict['Excess Enthalpy [J/mol]'] != 0
+                MAE_all_comps_ranks = np.array([np.mean(diff_MC[idx_non_zero][( (data_dict['Component 1'][idx_non_zero] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'][idx_non_zero] == self.c_all[idx[1]]).astype(int) ) == 2], axis=0) for idx in Idx])
+                plot_path = f'{png_path}_MARE.png'
+            min_MAE_ranks_idx = np.argmin(MAE_all_comps_ranks, axis=1)
+            A_ranks_idx = np.nan*np.ones((N,N))
+            A_ranks_idx[Idx[:,0], Idx[:,1]] = min_MAE_ranks_idx + 0.5
+            rr, counts = np.unique(min_MAE_ranks_idx, return_counts=True)
+            # Set count to zero if rank not encountered
+            idx_ranks = (np.sum(self.ranks[rr][:,np.newaxis] == self.ranks[np.newaxis,:], axis=0) == 0)
+            for i in range(np.sum(idx_ranks)):
+                iidx = np.where(idx_ranks)[0][i]
+                rr = np.insert(rr, iidx, np.arange(len(self.ranks))[iidx])
+                counts = np.insert(counts, iidx, 0)
+
+            fig,ax = plt.subplots(figsize=(10,10))
+
+            cmap = ListedColormap(['red', 'green', 'blue', 'yellow', 'cyan', 'magenta', 'orange', 'black'])
+            norm = BoundaryNorm(np.arange(len(self.ranks)+1), len(self.ranks)+1)
+            im = ax.imshow(A_ranks_idx, cmap=cmap, norm=norm)
+            cbar = fig.colorbar(im, ax=ax, ticks=np.arange(len(self.ranks))+0.5, shrink=0.8)
+            cticks = [f'{self.ranks[i]} ({counts[i]})' for i in range(len(self.ranks))]
+            cbar.set_ticklabels(cticks, fontsize=10)
+
+            A_grey = np.nan*np.eye(N)
+            for i in range(N):
+                for j in range(i,N):
+                    A_grey[j,i] = 0.25
+                
+            ax.imshow(A_grey, cmap='Greys',vmin=0,vmax=1)
+
+            unique_fg, idx, counts = np.unique(self.fg, return_index=True, return_counts=True)
+            unique_fg = unique_fg[np.argsort(idx)]
+            counts = counts[np.argsort(idx)]
+            counts[0]=counts[0]-1
+            counts = counts
+
+            end_points = [0]
+            for count in np.cumsum(counts):
+                count += 0.5
+                end_points += [count]
+                ax.plot([count, count], [0, N-1], '--k', alpha=0.3)
+                ax.plot([0, N-1], [count, count], '--k', alpha=0.3)
+
+            if data_type == 'Testing':
+                ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], '*k', markersize=5, alpha=0.2)
+
+            mid_points = (np.array(end_points[:-1])+np.array(end_points[1:]))/2
+            ax.set_xticks(mid_points, unique_fg, rotation=90, fontsize=12)
+            ax.set_yticks(mid_points, unique_fg, fontsize=12)
+
+            # Add text to the color bar
+            # Get the position of the colorbar's axis
+            cbar_pos = cbar.ax.get_position()  # Returns a Bbox object
+
+            # Extract the bounding box coordinates: (x0, y0) is the bottom-left corner, and (width, height) are its dimensions
+            x0, y0, width, height = cbar_pos.x0, cbar_pos.y0, cbar_pos.width, cbar_pos.height
+
+            # Calculate the vertical positions for the text: bottom, middle, and top of the colorbar
+            text_positions = [y0, y0 + height / 2, y0 + 0.9999*height]
+
+            cbar_title = 'Best performing rank (Count)'
+            fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90, fontsize=15)  # Middle text
+
+            fig.savefig(plot_path, dpi=500, bbox_inches='tight')
+
+            plt.clf()
+            plt.close()
+
+            clear_output(wait=False)
 
     
 

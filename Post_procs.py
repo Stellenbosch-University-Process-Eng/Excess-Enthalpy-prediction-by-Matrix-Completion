@@ -645,11 +645,7 @@ class Post_process:
             png_path = f'{self.path}/{ranks[0]}/2D Plots/{data_type}'
         else:
             png_path = f'{self.path}/2D Plots/{data_type}'
-
-        try:
-            os.makedirs(png_path)
-        except:
-            pass
+        os.makedirs(png_path, exist_ok=True)
 
         for j in range(Idx.shape[0]):
             y_idx = exp_mix == unique_mix[j]
@@ -685,8 +681,8 @@ class Post_process:
                     if np.sum(T_MC_idx) > 0:
                         T_MC_idx = np.where(T_MC_idx)[0][0]
                         ax.plot(x2_int, y_MC_interp[ranks_idx,T_MC_idx*x2_int.shape[0]:(T_MC_idx+1)*x2_int.shape[0],j][0,:], '.r', markersize=15, label=f'MC Rec Rank {ranks[0]}')
-                    ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_MC_mean[T_UNIFAC_idx], '-r', label=f'MC Smooth Rank {ranks[0]}')
-                    ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_UNIFAC[T_UNIFAC_idx], '-g', label='UNIFAC')
+                    ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_MC_mean[T_UNIFAC_idx], '-g', label=f'MC Smooth Rank {ranks[0]}')
+                    ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_UNIFAC[T_UNIFAC_idx], '-r', label='UNIFAC')
                 else:
                     for m in range(len(ranks)):
                         ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_MC_mean[T_UNIFAC_idx,m], '-', color=f'{colours[ranks_idx[m]]}', label=f'MC Rank {ranks[m]}')

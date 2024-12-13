@@ -991,6 +991,117 @@ class Post_process:
 
             clear_output(wait=False)
 
-    
+    def plot_MC_vs_UNIFAC_sparsity(self, data_type=None, A=None) -> None:
+        """
+        Description: Plots the MC vs UNIFAC metric sparsity plots per compound for the testing or training mixtures.
 
+        Inputs:
+            data_type   : str       -> Type of data to plot. Must be either 'Testing' or 'Training'.
+            A           : np.array  -> A tensor of size ranks x num_temperatures x num_compositions/2 x num_compounds x num_compounds (Optional)
+
+        Outputs:
+            None. Generates the 2D plots
+        """
+        assert data_type in ['Testing', 'Training'], "data_type must be either 'Testing' or 'Training'"
+
+        if A is None:
+            A = self.get_tensors()
+        if data_type == 'Testing':
+            data_dict = self.get_testing_values(A=A)
+            Idx = self.testing_indices
+        elif data_type == 'Training':
+            data_dict = self.get_reconstructed_values(A=A)
+            Idx = self.Idx_known
+
+        png_path = f'{self.path}/2D Plots/MC_vs_UNIFAC/{data_type}'
+        os.makedirs(png_path, exist_ok=True) # Create directory if it does not exist
+        max_val = 100 # max value for the difference in metrics
+
+        N = len(self.c_all)
+        for r in range(len(self.ranks)):
+            for metric in ['MAE', 'MARE']:
+                if metric == 'MAE':
+                    diff_MC = np.abs(data_dict['MC [J/mol]'][:,r] - data_dict['Excess Enthalpy [J/mol]'])
+                    diff_UNI = np.abs(data_dict['UNIFAC_DMD [J/mol]'] - data_dict['Excess Enthalpy [J/mol]'])
+                    mean_MC_err = np.array([np.mean(diff_MC[( (data_dict['Component 1'] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'] == self.c_all[idx[1]]).astype(int) ) == 2]) for idx in Idx])
+                    mean_UNI_err = np.array([np.mean(diff_UNI[( (data_dict['Component 1'] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'] == self.c_all[idx[1]]).astype(int) ) == 2]) for idx in Idx])
+                    plot_path = f'{png_path}/MAE_{self.ranks[r]}.png'
+                    cbar_title = 'Difference in MAE [J/mol]'
+                elif metric == 'MARE':
+                    diff_MC = np.abs(data_dict['MC [J/mol]'][:,r] - data_dict['Excess Enthalpy [J/mol]'])/np.abs(data_dict['Excess Enthalpy [J/mol]'])*100
+                    diff_UNI = np.abs(data_dict['UNIFAC_DMD [J/mol]'] - data_dict['Excess Enthalpy [J/mol]'])/np.abs(data_dict['Excess Enthalpy [J/mol]'])*100
+                    idx_non_zero = data_dict['Excess Enthalpy [J/mol]'] != 0
+                    mean_MC_err = np.array([np.mean(diff_MC[idx_non_zero][( (data_dict['Component 1'][idx_non_zero] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'][idx_non_zero] == self.c_all[idx[1]]).astype(int) ) == 2]) for idx in Idx])
+                    mean_UNI_err = np.array([np.mean(diff_UNI[idx_non_zero][( (data_dict['Component 1'][idx_non_zero] == self.c_all[idx[0]]).astype(int) + (data_dict['Component 2'][idx_non_zero] == self.c_all[idx[1]]).astype(int) ) == 2]) for idx in Idx])
+                    plot_path = f'{png_path}/MARE_{self.ranks[r]}.png'
+                    cbar_title = 'Difference in MARE [%]'
+                
+                mean_diff = mean_UNI_err - mean_MC_err
+                mean_diff[mean_diff > max_val] = max_val
+                mean_diff[mean_diff < -max_val] = -max_val
+
+                A_diff = np.nan*np.ones((N,N))
+                A_diff[Idx[:,0], Idx[:,1]] = mean_diff
+
+                fig,ax = plt.subplots(figsize=(10,10))
+
+                im = ax.imshow(A_diff, cmap='RdYlGn', vmin=-max_val, vmax=max_val)
+                cbar = fig.colorbar(im, shrink=0.8)
+                c_ticks = cbar.get_ticks().astype(int)
+                c_tick_labels = c_ticks.astype(str)
+                c_tick_labels[0] = f'<{c_tick_labels[0]}'
+                c_tick_labels[-1] = f'>{c_tick_labels[-1]}'
+                cbar.set_ticks(c_ticks)
+                cbar.set_ticklabels(c_tick_labels)
+
+                A_grey = np.nan*np.eye(N)
+                for i in range(N):
+                    for j in range(i,N):
+                        A_grey[j,i] = 0.25
+                    
+                ax.imshow(A_grey, cmap='Greys',vmin=0,vmax=1)
+
+                unique_fg, idx, counts = np.unique(self.fg, return_index=True, return_counts=True)
+                unique_fg = unique_fg[np.argsort(idx)]
+                counts = counts[np.argsort(idx)]
+                counts[0]=counts[0]-1
+                counts = counts
+
+                end_points = [0]
+                for count in np.cumsum(counts):
+                    count += 0.5
+                    end_points += [count]
+                    ax.plot([count, count], [0, N-1], '--k', alpha=0.3)
+                    ax.plot([0, N-1], [count, count], '--k', alpha=0.3)
+
+                if data_type == 'Testing':
+                    ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], '*k', markersize=5, alpha=0.2, label='Training Data')
+                    ax.legend(loc='upper center', fontsize=12, bbox_to_anchor=(0.5, 1.07))
+
+                mid_points = (np.array(end_points[:-1])+np.array(end_points[1:]))/2
+                ax.set_xticks(mid_points, unique_fg, rotation=90, fontsize=12)
+                ax.set_yticks(mid_points, unique_fg, fontsize=12)
+
+                # Add text to the color bar
+                # Get the position of the colorbar's axis
+                cbar_pos = cbar.ax.get_position()  # Returns a Bbox object
+
+                # Extract the bounding box coordinates: (x0, y0) is the bottom-left corner, and (width, height) are its dimensions
+                x0, y0, width, height = cbar_pos.x0, cbar_pos.y0, cbar_pos.width, cbar_pos.height
+
+                # Calculate the vertical positions for the text: bottom, middle, and top of the colorbar
+                text_positions = [y0, y0 + height / 2, y0 + 0.9999*height]
+
+                # Add text next to these positions using fig.text
+                fig.text(x0 + 0.8*width, text_positions[0], '(UNIFAC Best)', ha='left', va='center')  # Bottom text
+                fig.text(x0 + 0.8*width, text_positions[1], '(No difference)', ha='left', va='center')  # Middle text
+                fig.text(x0 + 0.8*width, text_positions[2], '(MC Best)', ha='left', va='center')     # Top text
+                fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90, fontsize=15)  # Middle text
+
+                fig.savefig(plot_path, dpi=500, bbox_inches='tight')
+
+                plt.clf()
+                plt.close()
+
+                clear_output(wait=False)
     

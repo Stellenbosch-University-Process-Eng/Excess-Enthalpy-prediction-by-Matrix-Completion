@@ -1105,3 +1105,177 @@ class Post_process:
 
                 clear_output(wait=False)
     
+    def plot_diff_MC_and_UNIFAC_unknown(self, A=None) -> None:
+        """
+        Description: Plots the mean difference between the MC and UNIFAC predictions for all the mixtures.
+
+        Inputs:
+            A           : np.array  -> A tensor of size ranks x num_temperatures x num_compositions/2 x num_compounds x num_compounds (Optional)
+
+        Outputs:
+            None. Generates the 2D plots"""
+        
+        if A is None:
+            A = self.get_tensors()
+        
+        png_path = f'{self.path}/2D Plots/Difference_MC_UNIFAC_Unknown'
+        os.makedirs(png_path, exist_ok=True) # Create directory if it does not exist
+        
+        # Read UNIFAC Excel predictions
+        df_unknown = pd.read_excel(self.excel_unknown_vs_uni)
+        if self.T == '298':
+            df_unknown = df_unknown[df_unknown['Temperature [K]'] == 298.15].copy().reset_index(drop=True)
+        
+        # Extract data across all mixtures
+        N = len(self.c_all)
+        T2_int = np.array(json.load(open(self.data_file, 'r'))['T2_int'])
+        N_C = json.load(open(self.data_file, 'r'))['N_C']
+        Idx_all = np.array([[i, j] for i in range(N) for j in range(i+1, N)])
+        y_MC_interps = self.extract_interps(A=A, Idx=Idx_all)
+        A_unknown = np.nan*np.ones((len(self.ranks), len(T2_int),N,N))
+        for n in range(Idx_all.shape[0]):
+            i = Idx_all[n,0]
+            j = Idx_all[n,1]
+            c1 = self.c_all[i]
+            c2 = self.c_all[j]
+            c1_idx = df_unknown['Component 1'].to_numpy().astype(str) == c1
+            c2_idx = df_unknown['Component 2'].to_numpy().astype(str) == c2
+            c_idx = (c1_idx.astype(int) + c2_idx.astype(int)) == 2
+            for t in range(len(T2_int)):
+                T_idx_UNI = np.abs(df_unknown['Temperature [K]'].to_numpy().astype(float)[c_idx] - T2_int[t]) <= 0.5
+                y_MC = y_MC_interps[:,t*N_C:(t+1)*N_C,n]
+                y_UNI = df_unknown['UNIFAC_DMD [J/mol]'].to_numpy().astype(float)[c_idx][T_idx_UNI][np.newaxis,:]
+                A_unknown[:, t, i, j] = np.mean(np.abs(y_MC - y_UNI), axis=1)
+            clear_output(wait=False)
+            print(f'{n+1}/{Idx_all.shape[0]}') # Print progress since this may take long
+        clear_output(wait=False)
+
+        for r in range(len(self.ranks)):
+            for t in range(len(T2_int)):
+                fig , ax = plt.subplots(figsize=(10,10))
+                cbar_ticks = [1, 10, 100, 1000, 10000]
+                im = ax.imshow(A_unknown[r,t,:,:], cmap='RdYlGn_r', norm=LogNorm(vmin=cbar_ticks[0], vmax=cbar_ticks[-1], clip=True))
+                cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+                cbar_tick_labels = [rf'$10^{int(np.log10(cc))}$' for cc in cbar_ticks]
+                cbar_tick_labels[0] = rf'$<${cbar_tick_labels[0]}'
+                cbar_tick_labels[-1] = rf'$>${cbar_tick_labels[-1]}'
+                cbar.set_ticks(cbar_ticks)
+                cbar.set_ticklabels(cbar_tick_labels)
+
+                A_grey = np.nan*np.eye(N)
+                for i in range(N):
+                    for j in range(i,N):
+                        A_grey[j,i] = 0.25
+                    
+                ax.imshow(A_grey, cmap='Greys',vmin=0,vmax=1)
+
+                unique_fg, idx, counts = np.unique(self.fg, return_index=True, return_counts=True)
+                unique_fg = unique_fg[np.argsort(idx)]
+                counts = counts[np.argsort(idx)]
+                counts[0]=counts[0]-1
+                counts = counts
+
+                end_points = [0]
+                for count in np.cumsum(counts):
+                    count += 0.5
+                    end_points += [count]
+                    ax.plot([count, count], [0, N-1], '--k', alpha=0.3)
+                    ax.plot([0, N-1], [count, count], '--k', alpha=0.3)
+
+                mid_points = (np.array(end_points[:-1])+np.array(end_points[1:]))/2
+                ax.set_xticks(mid_points, unique_fg, rotation=90, fontsize=12)
+                ax.set_yticks(mid_points, unique_fg, fontsize=12)
+
+                markersize = 4
+                marker_lw = 0.5
+
+                ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], 'sk', markersize=markersize, fillstyle='none', markeredgewidth=marker_lw, label='Training')
+
+                ax.plot(self.testing_indices[:,1], self.testing_indices[:,0], 'sb', markersize=markersize, fillstyle='none', markeredgewidth=marker_lw, label='Testing')
+
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.07), ncol=2, fontsize=12)
+
+                cbar_pos = cbar.ax.get_position()  # Returns a Bbox object
+
+                # Extract the bounding box coordinates: (x0, y0) is the bottom-left corner, and (width, height) are its dimensions
+                x0, y0, width, height = cbar_pos.x0, cbar_pos.y0, cbar_pos.width, cbar_pos.height
+
+                # Calculate the vertical positions for the text: bottom, middle, and top of the colorbar
+                text_positions = [y0, y0 + height / 2, y0 + 0.9999*height]
+
+                cbar_title = 'Mean Absolute Difference between MC and UNIFAC [J/mol]'
+                fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90, fontsize=15)  # Middle text
+
+                plot_path = f'{png_path}/Rank_{self.ranks[r]}_T_{T2_int[t]}.png'
+
+                fig.savefig(plot_path, dpi=500, bbox_inches='tight')
+
+                plt.clf()
+                plt.close()
+
+                clear_output(wait=False)
+            
+            # Plot overall mean difference
+            if self.T == 'all':
+                fig , ax = plt.subplots(figsize=(10,10))
+                cbar_ticks = [1, 10, 100, 1000, 10000]
+                im = ax.imshow(np.mean(A_unknown[r,:,:,:], axis=0), cmap='RdYlGn_r', norm=LogNorm(vmin=cbar_ticks[0], vmax=cbar_ticks[-1], clip=True))
+                cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+                cbar_tick_labels = [rf'$10^{int(np.log10(cc))}$' for cc in cbar_ticks]
+                cbar_tick_labels[0] = rf'$<${cbar_tick_labels[0]}'
+                cbar_tick_labels[-1] = rf'$>${cbar_tick_labels[-1]}'
+                cbar.set_ticks(cbar_ticks)
+                cbar.set_ticklabels(cbar_tick_labels)
+
+                A_grey = np.nan*np.eye(N)
+                for i in range(N):
+                    for j in range(i,N):
+                        A_grey[j,i] = 0.25
+                    
+                ax.imshow(A_grey, cmap='Greys',vmin=0,vmax=1)
+
+                unique_fg, idx, counts = np.unique(self.fg, return_index=True, return_counts=True)
+                unique_fg = unique_fg[np.argsort(idx)]
+                counts = counts[np.argsort(idx)]
+                counts[0]=counts[0]-1
+                counts = counts
+
+                end_points = [0]
+                for count in np.cumsum(counts):
+                    count += 0.5
+                    end_points += [count]
+                    ax.plot([count, count], [0, N-1], '--k', alpha=0.3)
+                    ax.plot([0, N-1], [count, count], '--k', alpha=0.3)
+
+                mid_points = (np.array(end_points[:-1])+np.array(end_points[1:]))/2
+                ax.set_xticks(mid_points, unique_fg, rotation=90, fontsize=12)
+                ax.set_yticks(mid_points, unique_fg, fontsize=12)
+
+                markersize = 4
+                marker_lw = 0.5
+
+                ax.plot(self.Idx_known[:,1], self.Idx_known[:,0], 'sk', markersize=markersize, fillstyle='none', markeredgewidth=marker_lw, label='Training')
+
+                ax.plot(self.testing_indices[:,1], self.testing_indices[:,0], 'sb', markersize=markersize, fillstyle='none', markeredgewidth=marker_lw, label='Testing')
+
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.07), ncol=2, fontsize=12)
+
+                cbar_pos = cbar.ax.get_position()  # Returns a Bbox object
+
+                # Extract the bounding box coordinates: (x0, y0) is the bottom-left corner, and (width, height) are its dimensions
+                x0, y0, width, height = cbar_pos.x0, cbar_pos.y0, cbar_pos.width, cbar_pos.height
+
+                # Calculate the vertical positions for the text: bottom, middle, and top of the colorbar
+                text_positions = [y0, y0 + height / 2, y0 + 0.9999*height]
+
+                cbar_title = 'Mean Absolute Difference between MC and UNIFAC [J/mol]'
+                fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90, fontsize=15)  # Middle text
+
+                plot_path = f'{png_path}/Rank_{self.ranks[r]}_T_overall.png'
+
+                fig.savefig(plot_path, dpi=500, bbox_inches='tight')
+
+                plt.clf()
+                plt.close()
+
+                clear_output(wait=False)

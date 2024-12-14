@@ -680,7 +680,7 @@ class Post_process:
                     T_MC_idx = T2_int == TT 
                     if np.sum(T_MC_idx) > 0:
                         T_MC_idx = np.where(T_MC_idx)[0][0]
-                        ax.plot(x2_int, y_MC_interp[ranks_idx,T_MC_idx*x2_int.shape[0]:(T_MC_idx+1)*x2_int.shape[0],j][0,:], '.r', markersize=15, label=f'MC Rec Rank {ranks[0]}')
+                        ax.plot(x2_int, y_MC_interp[ranks_idx,T_MC_idx*x2_int.shape[0]:(T_MC_idx+1)*x2_int.shape[0],j][0,:], '.g', markersize=15, label=f'MC Rec Rank {ranks[0]}')
                     ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_MC_mean[T_UNIFAC_idx], '-g', label=f'MC Smooth Rank {ranks[0]}')
                     ax.plot(x_UNIFAC[T_UNIFAC_idx], yy_UNIFAC[T_UNIFAC_idx], '-r', label='UNIFAC')
                 else:

@@ -16,12 +16,13 @@ from matplotlib.lines import Line2D
 import matplotlib.cm as cm
 import json
 from IPython.display import clear_output
+from tqdm.notebook import tqdm
 
 if sys.platform == 'win32':
-    home_path = 'C:/Users/Garren/Documents/Article - Pure PMF/Pure_MC/'
+    home_path = 'C:/Users/Garren/Documents/Article - Pure PMF/new_adjusted_RK/'
     
 else:
-    home_path = '/home/garren/Article - Pure PMF/Pure_MC/'
+    home_path = '/home/garren/Article - Pure PMF/new_adjusted_RK/'
 
 # Use Agg for saving a lot of plots without opening figure window
 matplotlib.use('Agg')
@@ -126,10 +127,6 @@ class Post_process:
             indices_df_298          : np.array          -> Array of indices for testing mixtures at 298 K.
                                                            Only used if T == '298'.
         """                                                
-
-        # Stan files
-        self.stan_path = f'{home_path}/Stan Models'
-        self.stan_file = f'{self.stan_path}/Pure_PMF_include_clusters_{include_clusters}_zeros_{include_zeros}_refT_'
         # paths to excel files
         self.excel_data = f'{home_path}/AllData.xlsx' # Path to testing data file
         self.excel_plots_known = f'{home_path}/UNIFAC_Plots.xlsx' # Path to known data plots
@@ -138,11 +135,8 @@ class Post_process:
         assert T in ['298', 'all'], "T must be either '298' or 'all'"
         if T == '298':
             home_path += 'Pure RK PMF - 298'
-            self.stan_file += 'False' # always exclude reference temperature
         else:
             home_path += 'Pure RK PMF'
-            self.stan_file += f'{refT}'
-        self.stan_file += '.stan' # append stan file extension
         
         self.include_clusters = include_clusters    # Add clusters
         self.include_zeros = include_zeros          # Add zeros         
@@ -167,8 +161,8 @@ class Post_process:
 
         # Kernel functions
         self.Kx = lambda x1, x2: np.column_stack([np.column_stack([x1**(i+2)-x1 for i in range(3)]), 
-                                     1e-1*x1*np.sqrt(1-x1)*np.exp(x1)]) @ np.column_stack([np.column_stack([x2**(i+2)-x2 for i in range(3)]), 
-                                                                                           1e-1*x2*np.sqrt(1-x2)*np.exp(x2)]).T
+                                     1e-1*x1*np.sqrt(1-x1)*np.exp(x1), 1e-1*(1-x1)*np.sqrt(x1)*np.exp(1-x1)]) @ np.column_stack([np.column_stack([x2**(i+2)-x2 for i in range(3)]), 
+                                                                                           1e-1*x2*np.sqrt(1-x2)*np.exp(x2), 1e-1*(1-x2)*np.sqrt(x2)*np.exp(1-x2)]).T
         self.KT = lambda T1, T2: np.column_stack([np.ones_like(T1), T1, T1**2, 1e-3*T1**3]) @ np.column_stack([np.ones_like(T2), T2, T2**2, 1e-3*T2**3]).T
         self.K = lambda x1, x2, T1, T2: self.Kx(x1, x2) * self.KT(T1, T2)
 
@@ -195,8 +189,6 @@ class Post_process:
         self.log_prob = []
         self.log_obj = []
         
-        # stan model for log_prob calculations
-        model = cmdstanpy.CmdStanModel(stan_file=self.stan_file)
         A = [] # list of all A tensors to be converted to strings
         
         v_cluster = np.array(json.load(open(self.data_file, 'r'))['v_cluster'])
@@ -205,24 +197,16 @@ class Post_process:
 
         for rank in self.ranks:
             m = {}
-            try:
-                csv_file = [f'{self.path}/{rank}/{f}' for f in os.listdir(f'{self.path}/{rank}') if f.endswith('.csv')][0]
-                MAP = cmdstanpy.from_csv(csv_file)
-                keys = list(MAP.stan_variables().keys())
-                for key in keys:
-                    m[key] = MAP.stan_variables()[key]
-                del MAP, csv_file
-            except:
-                inits_file = f'{self.path}/{rank}/inits.json'
-                m = json.load(open(inits_file, 'r'))
-                keys = list(m.keys())
-                for key in keys:
-                    m[key] = np.array(m[key])
-                del inits_file
+            csv_file = [f'{self.path}/{rank}/{f}' for f in os.listdir(f'{self.path}/{rank}') if f.endswith('.csv')][0]
+            MAP = cmdstanpy.from_csv(csv_file)
+            self.log_prob += [MAP.optimized_params_dict["lp__"]]
+            keys = list(MAP.stan_variables().keys())
+            for key in keys:
+                m[key] = MAP.stan_variables()[key]
+            del MAP, csv_file
             data = json.load(open(self.data_file, 'r'))
             data['D'] = rank
             data['v_features'] = 100*np.ones(rank)
-            self.log_prob += [model.log_prob(data=data, params=m).iloc[0,0]]
             self.log_obj += [np.log(-self.log_prob[-1])]
 
             sigma_cluster = np.sqrt(v_cluster)[np.newaxis,:] * np.ones((rank,1))
@@ -298,18 +282,29 @@ class Post_process:
         # Extraxt testing data from excel
         data_df = pd.read_excel(self.excel_data)
         if self.T == '298':
-            data_df = data_df[self.indices_df_298]
+            data_df = data_df[self.indices_df_298].reset_index(drop=True)
         mix_all = np.char.add(np.char.add(data_df['Component 1'].to_numpy().astype(str), ' + '), data_df['Component 2'].to_numpy().astype(str))
         mix_known = np.char.add(np.char.add(self.c_all[self.Idx_known[:,0]], ' + '), self.c_all[self.Idx_known[:,1]])
 
-        x = [data_df['Composition component 1 [mol/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known]
-        T = [data_df['Temperature [K]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known]
-        y_exp = np.concatenate([data_df['Excess Enthalpy [J/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known])
-        y_UNIFAC = np.concatenate([data_df['UNIFAC_DMD [J/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known])
-        c1 = np.concatenate([data_df['Component 1'].to_numpy().astype(str)[mix_all == mix] for mix in mix_known])
-        c2 = np.concatenate([data_df['Component 2'].to_numpy().astype(str)[mix_all == mix] for mix in mix_known])
+        idx_data_known = [np.where(mix_all == mix)[0] for mix in mix_known]
 
-        del data_df
+        extractcols = ["Component 1",
+                       "Component 2",
+                       "Composition component 1 [mol/mol]",
+                       "Temperature [K]",
+                       "Excess Enthalpy [J/mol]",
+                       "UNIFAC_DMD [J/mol]"]
+
+        c1, c2, x, T, y_exp, y_UNIFAC = [[data_df.loc[idx, ex].to_numpy().astype(str) if ex in ["Component 1", "Component 2"] 
+                                            else data_df.loc[idx, ex].to_numpy().astype(float) 
+                                            for idx in idx_data_known] for ex in extractcols]
+
+        y_exp = np.concatenate(y_exp)
+        y_UNIFAC = np.concatenate(y_UNIFAC)
+        c1 = np.concatenate(c1)
+        c2 = np.concatenate(c2)
+
+        del data_df, mix_all, mix_known, idx_data_known
 
         x2_int = np.array(json.load(open(self.data_file, 'r'))['x2_int'])
         T2_int = np.array(json.load(open(self.data_file, 'r'))['T2_int'])
@@ -366,24 +361,31 @@ class Post_process:
         # Extraxt testing data from excel
         data_df = pd.read_excel(self.excel_data)
         if self.T == '298':
-            data_df = data_df[self.indices_df_298]
+            data_df = data_df[self.indices_df_298].reset_index(drop=True)
         mix_all = np.char.add(np.char.add(data_df['Component 1'].to_numpy().astype(str), ' + '), data_df['Component 2'].to_numpy().astype(str))
         mix_known = np.char.add(np.char.add(self.c_all[self.testing_indices[:,0]], ' + '), self.c_all[self.testing_indices[:,1]])
+        idx_data_known = [np.where(mix_all == mix)[0] for mix in mix_known]
 
-        x = [data_df['Composition component 1 [mol/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known]
-        T = [data_df['Temperature [K]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known]
-        y_exp = np.concatenate([data_df['Excess Enthalpy [J/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known])
-        y_UNIFAC = np.concatenate([data_df['UNIFAC_DMD [J/mol]'].to_numpy().astype(float)[mix_all == mix] for mix in mix_known])
-        c1 = np.concatenate([data_df['Component 1'].to_numpy().astype(str)[mix_all == mix] for mix in mix_known])
-        c2 = np.concatenate([data_df['Component 2'].to_numpy().astype(str)[mix_all == mix] for mix in mix_known])
+        extractcols = ["Component 1",
+                       "Component 2",
+                       "Composition component 1 [mol/mol]",
+                       "Temperature [K]",
+                       "Excess Enthalpy [J/mol]",
+                       "UNIFAC_DMD [J/mol]"]
 
-        del data_df
+        c1, c2, x, T, y_exp, y_UNIFAC = [[data_df.loc[idx, ex].to_numpy().astype(str) if ex in ["Component 1", "Component 2"] 
+                                            else data_df.loc[idx, ex].to_numpy().astype(float) 
+                                            for idx in idx_data_known] for ex in extractcols]
+
+        y_exp = np.concatenate(y_exp)
+        y_UNIFAC = np.concatenate(y_UNIFAC)
+        c1 = np.concatenate(c1)
+        c2 = np.concatenate(c2)
+
+        del data_df, mix_all, mix_known, idx_data_known
 
         # get interpolated values
         y_MC_interp = self.extract_interps(A=A, Idx=self.testing_indices)
-
-        # All mixtures
-        mix_all = np.char.add(np.char.add('c1', ' + '), 'c2')
 
         # Extract data from file
         x2_int = np.array(json.load(open(self.data_file, 'r'))['x2_int'])
@@ -647,7 +649,7 @@ class Post_process:
             png_path = f'{self.path}/2D Plots/{data_type}'
         os.makedirs(png_path, exist_ok=True)
 
-        for j in range(Idx.shape[0]):
+        for j in tqdm(range(Idx.shape[0]), desc=f"Generating 2D plots for {data_type}: ", total=Idx.shape[0]):
             y_idx = exp_mix == unique_mix[j]
             UNIFAC_idx = UNIFAC_mix == unique_mix[j]
             yy = data_dict['Excess Enthalpy [J/mol]'][y_idx]
@@ -702,15 +704,12 @@ class Post_process:
                 plt.clf()
                 plt.close()
 
-                clear_output(wait=False)
-                print(f'{j}_{i}')
-        clear_output(wait=False)
-
-    def plot_func_groups_MC_vs_UNIFAC_with_embedded_box(self, data_type=None, A=None) -> None:
+    def plot_func_groups_MC_vs_UNIFAC_with_embedded_box(self, box, data_type=None, A=None) -> None:
         """
         Description: Plots the functional groups for the MC and UNIFAC predictions. The box plots are embedded in the plot.
 
         Inputs:
+            box         : bool      -> If True, the box plots are embedded in the plot.
             data_type   : str       -> Type of data to plot. Must be either 'Testing' or 'Training'.
             A           : np.array  -> A tensor of size ranks x num_temperatures x num_compositions/2 x num_compounds x num_compounds (Optional)
 
@@ -812,48 +811,49 @@ class Post_process:
                 cbar.set_ticklabels(c_tick_labels)
                 plt.tight_layout()
 
-                # Embed box plots
-                fract = 1/len(true_unique_fg) # lenght of total plot
-                offset = 0.17*fract  # offset for the box plots
-                ax1 = []    # List to store the axes for the box plots
-                for i in range(len(unique_fg_mix)):
-                    fg1_idx = fg1 == unique_fg_mix_split_testing[i][0]  # Functional groups of component 1 index
-                    fg2_idx = fg2 == unique_fg_mix_split_testing[i][1]  # Functional groups of component 2 index
-                    fg_idx = (fg1_idx.astype(int) + fg2_idx.astype(int)) == 2   # Functional groups of the mixture index
-                    xx, yy = fg_indices[i,1], len(true_unique_fg)-fg_indices[i,0] - 1   # x and y coordinates for the box plot. y coordinate is inverted due to the inverted y-axis
-                    rect = [xx*fract+offset, yy*fract+offset, fract-offset*2, fract-offset*2] # get the rectangle for the box plot
-                    box = ax.get_position() # get the position of the main plot
-                    width = box.width   # width of the main plot
-                    height = box.height # height of the main plot
-                    inax_position  = ax.transAxes.transform(rect[0:2]) 
-                    transFigure = fig.transFigure.inverted()
-                    infig_position = transFigure.transform(inax_position)    
-                    x = infig_position[0]
-                    y = infig_position[1]
-                    width *= rect[2]
-                    height *= rect[3]
-                    ax1 += [fig.add_axes([x,y,width,height])]
+                if box:
+                    # Embed box plots
+                    fract = 1/len(true_unique_fg) # lenght of total plot
+                    offset = 0.17*fract  # offset for the box plots
+                    ax1 = []    # List to store the axes for the box plots
+                    for i in range(len(unique_fg_mix)):
+                        fg1_idx = fg1 == unique_fg_mix_split_testing[i][0]  # Functional groups of component 1 index
+                        fg2_idx = fg2 == unique_fg_mix_split_testing[i][1]  # Functional groups of component 2 index
+                        fg_idx = (fg1_idx.astype(int) + fg2_idx.astype(int)) == 2   # Functional groups of the mixture index
+                        xx, yy = fg_indices[i,1], len(true_unique_fg)-fg_indices[i,0] - 1   # x and y coordinates for the box plot. y coordinate is inverted due to the inverted y-axis
+                        rect = [xx*fract+offset, yy*fract+offset, fract-offset*2, fract-offset*2] # get the rectangle for the box plot
+                        box = ax.get_position() # get the position of the main plot
+                        width = box.width   # width of the main plot
+                        height = box.height # height of the main plot
+                        inax_position  = ax.transAxes.transform(rect[0:2]) 
+                        transFigure = fig.transFigure.inverted()
+                        infig_position = transFigure.transform(inax_position)    
+                        x = infig_position[0]
+                        y = infig_position[1]
+                        width *= rect[2]
+                        height *= rect[3]
+                        ax1 += [fig.add_axes([x,y,width,height])]
 
-                    # Check for nan's if Relative error with exess enthalpy of zero
-                    idx_not_nan = data_dict['Excess Enthalpy [J/mol]'][fg_idx] != 0
-                    ax1[-1].boxplot(box_plot[fg_idx,0][idx_not_nan], whis=(0,100), 
-                                showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
-                                medianprops=dict(color=MC_colour, linewidth=1.5), showfliers=False, 
-                                boxprops=dict(color=MC_colour, linewidth=1.5), whiskerprops=dict(color=MC_colour, linewidth=1.5, linestyle='--'), 
-                                widths=0.9, positions=[1])
-                    ax1[-1].boxplot(box_plot[fg_idx,1][idx_not_nan], whis=(0,100), 
-                                showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
-                                medianprops=dict(color=UNI_colour, linewidth=1.5), showfliers=False, 
-                                boxprops=dict(color=UNI_colour, linewidth=1.5), whiskerprops=dict(color=UNI_colour, linewidth=1.5, linestyle='--'), 
-                                widths=0.9, positions=[2])
-                    
-                    # Cap the y-axis for the box plots at the 20th and 80th percentile and disable the ticks
-                    minlim = np.min(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 20, axis=0))
-                    maxlim = np.max(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 80, axis=0))
-                    ax1[-1].set_ylim(minlim, maxlim)
-                    ax1[-1].set_xticks([])
-                    ax1[-1].set_yticks([])
-                    ax1[-1].tick_params(axis='both', which='both', length=0)
+                        # Check for nan's if Relative error with exess enthalpy of zero
+                        idx_not_nan = data_dict['Excess Enthalpy [J/mol]'][fg_idx] != 0
+                        ax1[-1].boxplot(box_plot[fg_idx,0][idx_not_nan], whis=(0,100), 
+                                    showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
+                                    medianprops=dict(color=MC_colour, linewidth=1.5), showfliers=False, 
+                                    boxprops=dict(color=MC_colour, linewidth=1.5), whiskerprops=dict(color=MC_colour, linewidth=1.5, linestyle='--'), 
+                                    widths=0.9, positions=[1])
+                        ax1[-1].boxplot(box_plot[fg_idx,1][idx_not_nan], whis=(0,100), 
+                                    showmeans=True, meanline=True, meanprops=dict(color='k', linewidth=1.5, linestyle=(0, (1, 1))), 
+                                    medianprops=dict(color=UNI_colour, linewidth=1.5), showfliers=False, 
+                                    boxprops=dict(color=UNI_colour, linewidth=1.5), whiskerprops=dict(color=UNI_colour, linewidth=1.5, linestyle='--'), 
+                                    widths=0.9, positions=[2])
+                        
+                        # Cap the y-axis for the box plots at the 20th and 80th percentile and disable the ticks
+                        minlim = np.min(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 20, axis=0))
+                        maxlim = np.max(np.percentile(box_plot[fg_idx,:][idx_not_nan,:], 80, axis=0))
+                        ax1[-1].set_ylim(minlim, maxlim)
+                        ax1[-1].set_xticks([])
+                        ax1[-1].set_yticks([])
+                        ax1[-1].tick_params(axis='both', which='both', length=0)
 
                 # Grey plots for the lower triangle
                 for i in range(len(true_unique_fg)):
@@ -876,7 +876,10 @@ class Post_process:
                 fig.text(x0 + 0.8*width, text_positions[2], '(MC Best)', ha='left', va='center')     # Top text
                 fig.text(x0 - 0.1*width, text_positions[1], cbar_title, ha='center', va='center', rotation=90)  # Middle text
                 
-                plot_path = f'{png_path}/{metrics}_Rank_{self.ranks[r]}.png'
+                plot_path = f'{png_path}/{metrics}_Rank_{self.ranks[r]}'
+                if not box:
+                    plot_path += '_No_Box'
+                plot_path += '.png'
                 fig.savefig(plot_path, dpi=500, bbox_inches='tight')
                 plt.clf()
                 plt.close()

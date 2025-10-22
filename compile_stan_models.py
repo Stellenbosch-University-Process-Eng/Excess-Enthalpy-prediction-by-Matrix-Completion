@@ -37,14 +37,16 @@ def generate_stan_model_code(include_clusters: bool, add_zeros: bool, refT: bool
             matrix Kx(vector x1, vector x2, int order) {
                 int N = rows(x1);
                 int M = rows(x2);
-                matrix[N, order+1] X1;
-                matrix[M, order+1] X2;
+                matrix[N, order+2] X1;
+                matrix[M, order+2] X2;
                 for (i in 1:order) {
                     X1[:,i] = x1 .^(order+2-i) - x1;
                     X2[:,i] = x2 .^(order+2-i) - x2;
                 }
                 X1[:,order+1] = 1e-1 * x1 .* sqrt(1-x1) .* exp(x1);
+                X1[:,order+2] = 1e-1 * (1-x1) .* sqrt(x1) .* exp(1-x1);
                 X2[:,order+1] = 1e-1 * x2 .* sqrt(1-x2) .* exp(x2);
+                X2[:,order+2] = 1e-1 * (1-x2) .* sqrt(x2) .* exp(1-x2);
                 return X1 * X2';
             }
 

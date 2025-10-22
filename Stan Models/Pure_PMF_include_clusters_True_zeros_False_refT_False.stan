@@ -24,14 +24,16 @@
             matrix Kx(vector x1, vector x2, int order) {
                 int N = rows(x1);
                 int M = rows(x2);
-                matrix[N, order+1] X1;
-                matrix[M, order+1] X2;
+                matrix[N, order+2] X1;
+                matrix[M, order+2] X2;
                 for (i in 1:order) {
                     X1[:,i] = x1 .^(order+2-i) - x1;
                     X2[:,i] = x2 .^(order+2-i) - x2;
                 }
                 X1[:,order+1] = 1e-1 * x1 .* sqrt(1-x1) .* exp(x1);
+                X1[:,order+2] = 1e-1 * (1-x1) .* sqrt(x1) .* exp(1-x1);
                 X2[:,order+1] = 1e-1 * x2 .* sqrt(1-x2) .* exp(x2);
+                X2[:,order+2] = 1e-1 * (1-x2) .* sqrt(x2) .* exp(1-x2);
                 return X1 * X2';
             }
 
@@ -83,7 +85,6 @@
             vector[N_MC] T2;                                                                // concatenated vector of T2_int              
             vector[sum(N_points)] var_data = square(error*y1);                              // variance of the data
             int M = (N_C) %/% 2;                                                            // interger division to get the number of U matrices
-            array[N_known+N_unknown] int N_slice;                                           // array of integers to be used as indices in parallel computations
             array[N_known+N_unknown,2] int Idx_all = append_array(Idx_known, Idx_unknown);  // indices of all datasets
             array[N_known] int N_points_ad;                                                 // adjusted number of datapoints (with interpolated compositions)
             matrix[sum(N_points)+N_known*N_MC, max(N_points)+N_MC] L_all_inv;               // inverse of the cholesky decomposition of the covariance matrix of all known mixtures

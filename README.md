@@ -1,5 +1,7 @@
 # Pure_MC
-Respository for Article: #insert article name and doi
+Respository for Article: **Prediction of excess enthalpy in binary mixtures through probabilistic matrix completion, with a GP enforced smoothness constraint** (#insert doi) by 
+Garren Hermanus, Tobi Louw and Jamie Cripwell
+
 
 ## Prerequisites
 The code here makes use of [Stan](https://github.com/stan-dev) to perform optimization, through the python wrapper [cmstanpy](https://github.com/stan-dev/cmdstanpy). 
@@ -78,3 +80,4 @@ home_path
                         ├── <txt file> (stan output)
                         ├── inits.json (inits file not needed if csv file is good)
 ```
+
